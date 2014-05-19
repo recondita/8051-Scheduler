@@ -3,18 +3,13 @@
 
 ;verwendete Speicheradressen:
 ;2fh: StackPointer Zwischenspeicher
-;30h: frei (PSW Zwischenspeicher--> geht jetzt auf den stack)
-;31h: zwischenspeicher
-;32h: Sekunden-Timerverwendung
-;33h: reload-AN/AUS
-;34h-3Bh: 8-Bit timer 
-;3Ch-43h: 8-Bit timer reload werte
-;44h: Sekunden-TimerOverflows
-;45h-4Dh: eventuell timer offsets
+;30h: Scheduler-StackPointer zwischenspeicher
+;31h: Parameter für push/pop Regs
 ;4Eh: kernel aussetzter
-;4Fh: Programm das als naechstes fortgesetzt wird
-;50h: Anfang Stack Programm 1
-;65h: Anfang Stack Programm 2
+;4Fh: Prozess das als naechstes fortgesetzt wird
+;80h: SP-Sicherung Prozess 1
+;81h: Anfang Stack Prozess 1
+;0F0h: Anfang Stack Programm 2
 ;08Oh-8Fh: Sicherung Register + SP Programm 1
 ;090h-9Fh: Sicherung Register + SP Programm 2; dreieckstausch waere Langsamer und hier ist genug frei
 
