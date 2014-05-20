@@ -9,74 +9,53 @@
 ;4Fh: Prozess das als naechstes fortgesetzt wird
 ;80h: SP-Sicherung Prozess 1
 ;81h: Anfang Stack Prozess 1
-;0F0h: Anfang Stack Programm 2
-;08Oh-8Fh: Sicherung Register + SP Programm 1
-;090h-9Fh: Sicherung Register + SP Programm 2; dreieckstausch waere Langsamer und hier ist genug frei
+;0D0h Sp_sicherung Prozess 2
+;0D1h: Anfang Stack Prozess 2
+
+
 
 
 cseg at 0
-;EXTERN Code lcd-up.LCDIni; Wie bindet man in dieser IDE andere Dateien ein?
 jmp spl1; springe ueber die IR-Einspringadressen
 
 org 000Bh ;Timer Interrupt Einsprungsadresse
-;jmp ende
 jmp kerneltimer
 
-
-debug:; gibt die letzte Andresse auf dem Stack aus, 12 Bit reichen
-pop ACC
-RL A
-RL A
-RL A
-RL A
-cpl a
-orl A,#00001111B
-mov P0,A
-pop P1
-jmp ende
-
-
-
-;org 0A0h
+;Fuer den Aufruf per Timer:
+; welchselt den Prozess falls 4Eh==1
 kerneltimer:
 push PSW; PSW (flags) sichern
 mov 2fh,SP; Stack zwischenspeichern
-lcall increaseTimer; Timer für Programme
-djnz 4Eh, weg ;scheduler soll einmal aussetzten, wenn er vorher schon durch syscll aufgerufen wurde
+djnz 4Eh, weg ;Scheduler soll einmal aussetzten, wenn er vorher schon durch syscll aufgerufen wurde
 inc 4Eh; dec durch djnz rückgängig machen, djnz benötigt im gegensatz zu cjne rein register
-mov SP,#0F0h; dritter Stack "um den Weg zurückt zu finden"
-lcall scheduler; kontext und SP tauschen
+mov SP,#0F0h; dritter Stack "um den Weg zurück zu finden"
+lcall scheduler; Kontext und SP tauschen
 mov SP,2fh; SP wiederherstellen
 weg: pop PSW; PSW wiederherstellen
 reti; hoffentlich an die Richtige stelle zurück ;)
 
+; Zum Starten des ganzen
+; Stack fuer Prozess 2 2erstelle
+; und PC durch "lcall" darauf legen
 spl1:
-mov 3Ch,#20; Programmtimer Initialiseren
-mov 34h,3Ch
-mov 3Dh,#100
-mov 35h,#3Dh
-mov 4Eh,#1; Damit der scheduler beim nächten Timer Interrupt aufgerufen wird
-mov SP,#0D1h ;adresse stack programm 1
+mov 4Eh,#1; Damit der Scheduler beim nächten Timer Interrupt aufgerufen wird
+mov SP,#0D1h ;Adresse stack prozess 2
 lcall spl2; dient nur dazu die startadresse fuer Prg1 in den Stack zu schreiben, der rÃ¼cksprung wird dann vom kernel erledigt
 jmp prg2; springe zu prg2
 
-
+;Restliche Kontextsicherung fuer Prozess 2
+;Timer + Interrupt Initialisieren;
+;Prozess 1 starten
 spl2:
-mov 4Fh,#2; 2rogramm2 soll als nächtes gestartet werden
-push PSW; PSW fuer PRG2 auf den Stack
-mov 2fh,SP; SP von prg2 zwischenspeichern
-mov SP,#0F0h
-mov 31h,#0D0h; Adresse für die Kontextsicherung von prg2
+mov 4Fh,#2;prozess 2 soll als nächtes gestartet werden
+push PSW; PSW fuer prozess 2 auf den Stack
+mov 2fh,SP; SP von prozess 2 zwischenspeichern
+mov SP,#0F0h; Zusatzstack
+mov 31h,#0D0h; Adresse für die Kontextsicherung von prozess 2
 lcall pushRegs; Kontext sichern
-mov SP, #081h ; adresse stack programm2
+mov SP, #081h ; Adresse stack prozess 1
 ;Aktiviere Interrupts
-setb EX0; P3.2
-setb IT0; P3.2 flankengesteuert
-setb EX1; P3.3
-setb IT1; P3.3 flankengestuert
 setb ET0; Timer fuer den Scheduler
-setb 0B8h; Erhoehe Priorität für P3.2 
-mov 0B7h,#00000001B; hoechste Priorität für P3.2 damit er den Idle von P3.3 beenden kann.
 setb EA; Aktivere Interrupts allgemein
 mov TH0,#56;Initialisiere reload wert für Scheduler-Timer
 mov TL0,#56;Startwert für Scheduler Timer
@@ -85,92 +64,96 @@ setb TR0; Starte Timer
 jmp prg1; Beginne mit der ausführung von prg1
 
 
-;Hierueber kann ein Programm rechenzeit abgeben (soll spaeter auch Ausgabe etc bereitstellen)
+;Hierueber kann ein Prozess Rechenzeit abgeben (soll spaeter auch Ausgabe etc bereitstellen)
 ; Auch fuer die demo von Kooperativen MT, idle muesste dafuer entfernt werden
 syscll:
-push PSW
-mov 2Fh,SP
-push ACC
-mov ACC,4eh
-inc 4Eh; zähle 1 hoch um den ST einmal aussetzten zu lassen
-cjne A,#2, nicht; beide Programme haben ihre Zeit abgegeben
-;inc 4Eh; nochmal aussetzten?
-pop ACC
-mov SP,#0F0h
+push PSW; PSW auf den Stack bevor es verfaelscht wird
+mov 2Fh,SP; Prozess SP fuer die Sicherung nach 2Fh
+push ACC; Akku auf den Stack (er wird für cjne benoetigt)
+inc 4Eh; zähle 1 hoch um den Scheduler einmal aussetzten zu lassen
+mov A,4eh; cjne kann nur mit Registern vergleichen
+cjne A,#2, nicht; beide Prozesse haben ihre Zeit abgegeben
+pop ACC; Akku inhalt wiederherstellen
+mov SP,#0F0h; SchedulerStack anlegen
 lcall scheduler; Kontext vertauschen
-mov SP,2fh
-pop PSW
-ret
-nicht:; beide Programme haben nichts zu tun, CPU soll 2 Taktzyklen schlafen
+mov SP,2fh; (den anderen) Prozess SP wiederherstellen
+pop PSW; PSW vom Stack holen
+ret; Ruecksprung, zum anderen Prozess
+nicht:; beide Prozesse haben nichts zu tun, CPU soll bis in (Timer)-Interrupts schlafen
 lcall idle
 lcall idle
-pop ACC
-pop PSW
+pop ACC; Akku wiedherstellen
+pop PSW; PSWO wiederherstllen
 ret
 
-ende:jmp ende; loop, nichtmehr tun
+;fuer den rein kooperativen Betrieb. ACHTUNG: nicht mit dem praeemptiven Modus kombinieren
+;Wechselt den Prozess
+koop:
+push PSW; schnell das PSW sichern bevor es verfaelscht wird
+mov 2Fh,SP; Prozess SP sichern
+mov SP,#0F0h; Scheduler-Stack anlegen
+lcall scheduler; Kontext vertauschen
+mov SP,2fh; (den anderen)Prozess SP laden;
+pop PSW; PSW vom Stack holen
+ret
 
-idle: ;cpu soll ideln, verwendet Akku
+idle: ;cpu soll idlen, verwendet Akku
 mov A,PCON
 orl A,#1
 mov PCON,A
 ret;
 
-;Vertauscht sichert den einen Kontext und stellt den anderen wieder her
+;Vertauscht: sichert den einen Kontext und stellt den anderen wieder her
+; 4Fh speichert welcher Prozess als naechses dran ist
 scheduler:; sollte auf keinen Fall unterbrochen werden!
 mov 31h, R0; wird fuer die indirekte addressierung benötigt und wird deshalb zeischen gespeichert
-djnz 4FH, stack2; welches Programm ist als naechstes dran?
-mov 31h,#0D0h; Sicherungsadresse von prg2
-lcall pushRegs; Sicher Kontext
-mov 31h, #080h
-mov 4FH, #2; nächstes mal ist das andere Programm da
+djnz 4FH, stack2; welcher Prozess ist als naechstes dran?
+mov 31h,#0D0h; Sicherungsadresse von SP von Prozess 2
+lcall pushRegs; Sicherung des Kontext
+mov 31h, #080h; SP-Sicherung laden
+mov 4FH, #2; nächstes mal ist der andere Prozess da
 jmp weiter
 stack2:;siehe oben
-mov 31h,#080h
-lcall pushRegs
-mov 31h,#0D0h
+mov 31h,#080h; SP-Sicherungs Adresse
+lcall pushRegs; Sicherung des Kontextes
+mov 31h,#0D0h; SP-Sicherung laden
 weiter:
-mov R0,A; Akku enthält die adresse des ende der wiederherzustellenden Kontext-Sicherung
-lcall popRegs; Kontext ausgehend von der Adresse in R0 wiederherstellen
+lcall popRegs; Kontext wiederherstellen (31h als Parameter)
 ret;
 
-increaseTimer:; noch nicht fertig //TODO
-djnz 34h, notinc
-mov 34h,3Ch
-djnz 35h, notinc
-mov 35h,3Dh
-inc 39h
-notinc:ret; Hier sollte code stehn
-
-;Sichert den Kontext von in die andresse und folgende, die in R0 steht
-;zu sichernder SP soll in 2fh sein, kopie von R0 
-;(wird ja für die indirekte adressierung gebraucht) in 31H
+;Parameter: 31h: Adresse für Prozess SP Sicherung, 2Fh: Prozess SP
+;Verwended 30h zum Zwischenspeichern	
+;Pusht die Register auf den Stack von dem SP in 2Fh und speichert dann den SP in der Adresse
+; die in 31H steht
 pushRegs:
-mov 30h,SP
-mov SP,2fh
-push ACC;
-push B;
+mov 30h,SP; Scheduler SP zwischenspeichern
+mov SP,2fh; Prozess SP aktivieren, hierauf soll ja gesichert werden
+push ACC; Sichere Akku
+push B; Sichere B-Hilfsregister
+;Register R0-R7:
 push 0;R0
 push 1
 push 2
-push 3
+push 3; loopunwinding aus Performence gruenden
 push 4
 push 5
 push 6
 push 7;R7
-push DPL;
-push DPH;
-mov R0,31h
-mov @R0,SP
-mov SP,30h
+push DPL; DatenPointer-Low 
+push DPH; Datenpointer High
+mov R0,31h; R0, wird fuer die Indireke Adressierung benötigt
+mov @R0,SP; Sicher den SP in der Adresse aus 31h bzw R0
+mov SP,30h; verwende wieder den Scheduler SP
 ret;
 
-;Stellt die Register in umgekehrter Reihenfolge wieder her, ausgehend von der Adresse in R0
-; siehe push Regs
+;Parameter: 31h: enthaelt die Adresse aus der der Prozess-SP geladen werden soll
+;returnt in 2Fh den Prozess SP
+;Stellt den Prozess-Kontext aus dem Stack des geladenen SPs wieder her.
 popRegs:
-mov 30h, SP
-mov R0,31h
-mov SP, @R0
+mov 30h, SP; Scheduler SP zwischenspeichern
+mov R0,31h; R0 fuer indirekte Adressierung
+mov SP, @R0; Prozess SP aus der uebergebenen Adresse laden
+; Stelle alle Gegister in umgekehter Reihenfolge zu pushRegs wiederher (vom Stack))
 pop DPH
 pop DPL
 pop 7
@@ -183,67 +166,40 @@ pop 1
 pop 0
 pop B
 pop ACC
-mov 2Fh,SP 
-mov SP,30h
+mov 2Fh,SP; Prozess SP in 2Fh zwischenspeichern
+mov SP,30h; Scheduler Stack reaktivieren
 ret;
 
 
-
 prg1:; Demo Programm, kopiert die Dip schalter auf die neg-Logik
-mov A,P0
-anl A,#00001111B
-mov B,#8;
-mul AB
-mov TH0,A;
-
 mov A,P0;
 SWAP A
 orl A,#00001111B; Maskieren
-ausprg1:mov P0,A
-;lcall syscll; unterbricht sich selbst
+mov P0,A
 jmp prg1
 
-
-; lässt die stellung der dip schlater+knoepfe auf P1 rotieren
-prg2:;
-mov R4,#1
-loopprg2:
+;Rotiere die Stellung der DIP schalter auf P1,
+;lese DIP-Schalter nur einmal pro kompletter Rotation ein
+prg2:
+mov R1,#7
 mov A,P0
-lcall uprg2
-W0prg2:mov R1,#50
-W1prg2: mov R2,#255
-W2prg2: ;lcall syscll; unterbricht sich selbst um zeit abzugeben
-;mov A,P0
-;cjne A, 7Fh, neu
-;lcall syscll
-djnz R2, W2prg2
-djnz R1, W1prg2
-inc R4
-;mov A,#8
-cjne R4,#8,loopprg2
-jmp prg2
-neu:
-lcall uprg2
-;call syscll
-jmp W2prg2
-
-uprg2:
-mov R7,A
-anl A,#00001111B
-mov R6,A
-mov A,P3
-RL A
-RL A
-CPL A
 anl A,#11110000B
-orl A,R6
-cjne R4,#1,Wprg2
-jmp raus
-wprg2:mov 7fh,R4
-rotiereprg2: RL A
-djnz 7fh,rotiereprg2
-raus:mov P1,A
-mov 7fh, R7
+loopprg2:
+mov P1,A
+call warte;
+RL A;
+djnz R1, loopprg2
+jmp prg2
+
+; verwendet Register: R5, R6, R7
+warte:
+mov R5, #2
+W0prg2:mov R6,#255
+W1prg2: mov R7,#255
+W2prg2: ;lcall koop; syscll; unterbricht sich selbst um Zeit abzugeben
+djnz R7, W2prg2
+djnz R6, W1prg2
+djnz R5, W0prg2
 ret
 
 end
