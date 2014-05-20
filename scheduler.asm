@@ -5,7 +5,7 @@
 ;2fh: StackPointer Zwischenspeicher
 ;30h: Scheduler-StackPointer zwischenspeicher
 ;31h: Parameter für push/pop Regs
-;4Eh: kernel aussetzter
+;4Eh: Scheduler aussetzter
 ;4Fh: Prozess das als naechstes fortgesetzt wird
 ;80h: SP-Sicherung Prozess 1
 ;81h: Anfang Stack Prozess 1
